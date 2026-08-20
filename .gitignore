@@ -9,3 +9,4 @@ src/models/__pycache__/__init__.cpython-313.pyc
 src/scripts/Bachelors-Thesis.code-workspace
 runs/run_20251022-124353/artifacts/preds
 .DS_Store
+.vscode/
