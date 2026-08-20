@@ -37,7 +37,7 @@ def softmax(x: np.ndarray, axis: int = -1) -> np.ndarray:
 def main():
     args = parse_args()
 
-    device = torch.device("mps" if torch.cuda.is_available() else "cpu")
+    device = torch.device("mps" if torch.backends.mps.is_available() else ("cuda" if torch.cuda.is_available() else "cpu"))
 
     model_dir = Path(args.model_dir)
     tokenizer = AutoTokenizer.from_pretrained(model_dir)

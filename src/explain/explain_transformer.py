@@ -23,6 +23,8 @@ def parse_args():
     ap.add_argument("--text", required=True, help="Text to explain.")
     ap.add_argument("--max_len", type=int, default=256)
     ap.add_argument("--lime_features", type=int, default=10)
+    ap.add_argument("--num_samples", type=int, default=1000,
+                     help="LIME perturbation samples (LIME's own default is 5000, which is slow for large transformers).")
     return ap.parse_args()
 
 
@@ -37,7 +39,7 @@ def main():
     out_dir = Path(args.out_dir)
     out_dir.mkdir(parents=True, exist_ok=True)
 
-    device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
+    device = torch.device("mps" if torch.backends.mps.is_available() else ("cuda" if torch.cuda.is_available() else "cpu"))
 
     tokenizer = AutoTokenizer.from_pretrained(args.model_dir)
     model = AutoModelForSequenceClassification.from_pretrained(args.model_dir)
@@ -73,6 +75,7 @@ def main():
         text_instance=args.text,
         classifier_fn=proba_fn,
         num_features=args.lime_features,
+        num_samples=args.num_samples,
     )
 
     html_path = out_dir / "lime_explanation.html"

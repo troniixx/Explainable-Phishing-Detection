@@ -31,7 +31,7 @@ done
 ############################################
 
 # Toggle transformer fine tuning
-RUN_TRANSFORMER="${RUN_TRANSFORMER:-false}"
+RUN_TRANSFORMER="${RUN_TRANSFORMER:-true}"
 
 # Datasets
 BASELINE_CSV="data/baseline_spam-ham.csv"
@@ -43,9 +43,12 @@ ENRON_CSV="data/enron_emails.csv"  # optional holdout (ham-heavy)
 SAMPLE_TEXT="Your account requires a brief settings check. Please sign in to continue using secure session."
 
 # Transformer config
-TRANSFORMER_MODEL="distilroberta-base"
+TRANSFORMER_MODEL="xlm-roberta-large"
 TRANSFORMER_EPOCHS=3
 TRANSFORMER_MAXLEN=256
+TRANSFORMER_BATCH_SIZE=4
+TRANSFORMER_GRAD_ACCUM_STEPS=4
+TRANSFORMER_WARMUP_RATIO=0.06
 
 ############################################
 # Repo root / env
@@ -195,7 +198,10 @@ if [ "$START_FROM" -le 3 ] && [ "$END_AT" -ge 3 ]; then
       --model_name "$TRANSFORMER_MODEL" \
       --out_dir "models/$TRANS_OUT" \
       --epochs "$TRANSFORMER_EPOCHS" \
-      --max_len "$TRANSFORMER_MAXLEN" | tee "$LOG_DIR/transformer_train.log" >/dev/null
+      --max_len "$TRANSFORMER_MAXLEN" \
+      --batch_size "$TRANSFORMER_BATCH_SIZE" \
+      --grad_accum_steps "$TRANSFORMER_GRAD_ACCUM_STEPS" \
+      --warmup_ratio "$TRANSFORMER_WARMUP_RATIO" | tee "$LOG_DIR/transformer_train.log" >/dev/null
     TRANS_DIR="models/$TRANS_OUT"
     echo "✔ Transformer saved at: $TRANS_DIR"
     echo

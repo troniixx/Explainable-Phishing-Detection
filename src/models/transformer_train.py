@@ -4,20 +4,25 @@
 
 # fine-tunes a transformer model for spam/phishing detection
 import argparse
+from pathlib import Path
 import numpy as np
 from datasets import Dataset as HFDataset
 from transformers import AutoTokenizer, AutoModelForSequenceClassification, TrainingArguments, Trainer
 from sklearn.metrics import precision_recall_fscore_support, accuracy_score
 from .datasets import load_many
+from .evaluate import save_json
 
 def parse_args():
     ap = argparse.ArgumentParser()
     ap.add_argument('--datasets', nargs='+', required=True)
-    ap.add_argument('--model_name', default='distilroberta-base')
-    ap.add_argument('--out_dir', default='models/distilroberta')
+    ap.add_argument('--model_name', default='xlm-roberta-large')
+    ap.add_argument('--out_dir', default='models/xlm-roberta')
     ap.add_argument('--epochs', type=int, default=3)
     ap.add_argument('--max_len', type=int, default=256)
-    
+    ap.add_argument('--batch_size', type=int, default=16)
+    ap.add_argument('--grad_accum_steps', type=int, default=1)
+    ap.add_argument('--warmup_ratio', type=float, default=0.1)
+        
     return ap.parse_args()
 
 def main():
@@ -47,10 +52,13 @@ def main():
     training_args = TrainingArguments(
         output_dir=args.out_dir,
         learning_rate=2e-5,
-        per_device_train_batch_size=16,
-        per_device_eval_batch_size=32,
+        per_device_train_batch_size=args.batch_size,
+        per_device_eval_batch_size=max(args.batch_size, 32),
+        gradient_accumulation_steps=args.grad_accum_steps,
+        warmup_ratio=args.warmup_ratio,
         num_train_epochs=args.epochs,
-        weight_decay=0.01
+        weight_decay=0.01,
+        eval_strategy="epoch"
     )
 
     trainer = Trainer(
@@ -63,6 +71,11 @@ def main():
     trainer.train()
     trainer.save_model(args.out_dir)
     tokenizer.save_pretrained(args.out_dir)
+
+    eval_result = trainer.evaluate()
+    agg = {k[len("eval_"):]: v for k, v in eval_result.items() if k.startswith("eval_")}
+    save_json({"aggregate": agg}, Path(args.out_dir) / "metrics.json")
+    print(f"Saved metrics to {Path(args.out_dir) / 'metrics.json'}")
 
 if __name__ == "__main__":
     main()
