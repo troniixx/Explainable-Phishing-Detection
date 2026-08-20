@@ -320,6 +320,7 @@ def render_factcheck_panel(res):
         severity_badge("TLD Risk", res.components.get("tld_risk", 0)),
         severity_badge("URL Obfuscation", res.components.get("url_obfuscation", 0)),
         severity_badge("Claim Risk", res.components.get("claim_risk", 0)),
+        severity_badge("Unverified Entity", res.components.get("unverified_entity", 0)),
     ]
     st.markdown(" ".join(badges), unsafe_allow_html=True)
 

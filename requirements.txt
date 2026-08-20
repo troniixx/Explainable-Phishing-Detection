@@ -11,6 +11,7 @@ transformers>=4.35
 torch>=2.0
 sentence-transformers>=2.2
 accelerate>=0.26.0
+rapidfuzz>=3.0
 
 # Explainability
 lime>=0.2.0.1

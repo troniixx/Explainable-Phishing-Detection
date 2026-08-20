@@ -41,13 +41,14 @@ class FactCheckerFeaturizer(BaseEstimator, TransformerMixin):
         else:
             raise ValueError("Input should be a pandas DataFrame or an iterable of texts.")
         
-        feats = np.zeros((len(texts), 5), dtype=float)
+        feats = np.zeros((len(texts), 6), dtype=float)
         for i, (t, s) in enumerate(zip(texts, senders)):
             res = self.fc.check(t, sender_email=s)
             feats[i, 0] = res.fact_risk
             feats[i, 1] = res.components.get('brand_mismatch', 0.0)
-            feats[i, 2] = res.components.get('tld_severity', 0.0)
+            feats[i, 2] = res.components.get('tld_risk', 0.0)
             feats[i, 3] = res.components.get('url_obfuscation', 0.0)
             feats[i, 4] = res.components.get('claim_risk', 0.0)
-            
+            feats[i, 5] = res.components.get('unverified_entity', 0.0)
+
         return feats

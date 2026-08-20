@@ -8,6 +8,8 @@ from typing import List, Dict, Any, Tuple, Optional
 from urllib.parse import urlparse, unquote
 import idna
 import tldextract
+from transformers import pipeline
+from rapidfuzz import fuzz, process
 
 # NOTE: Docstrings were refined and reworded using ChatGPT for better clarity and consistency.
 # NOTE: ChatGPT was also used to help optimize some functions for clarity and performance.
@@ -293,8 +295,9 @@ class FactChecker:
         self.brands = load_brands()
         self.tld_risks = load_tld_risks()
         self.phrases = load_phrases()
+        self.ner = pipeline("token-classification", model="Davlan/distilbert-base-multilingual-cased-ner-hrl", aggregation_strategy="simple")
         
-    def extract_entities_and_claims(self, text:str) -> Tuple[List[str], Dict[str, List[str]]]:
+    def extract_entities_and_claims(self, text:str) -> Tuple[List[str], Dict[str, List[str]], List[Dict[str, Any]], List[str]]:
         # TODO: Add NER with spacy or similar
         # NOTE: For now: Minimal approach with regex and phrase matching
         brands_found = []
@@ -309,8 +312,28 @@ class FactChecker:
             for phrase in plist:
                 if phrase.lower() in lowered:
                     claims[cat].append(phrase)
+                    
+        ner_hits = self.ner(text)
+        unmatched_orgs = []
+        people_found = []
         
-        return list(dict.fromkeys(brands_found)), claims
+        STRIP_SUFFIXES = re.compile(r"\b(gmbh|ag|mbh|e\.v\.?|inc|llc|ltd|co)\b\.?", re.IGNORECASE)
+        
+        for hit in ner_hits:
+            if hit["score"] < 0.80:
+                continue
+            span = STRIP_SUFFIXES.sub("", hit["word"]).strip().lower()
+            
+            if hit["entity_group"] == "ORG":
+                match = process.extractOne(span, self.brands.keys(), scorer=fuzz.WRatio, score_cutoff=85)
+                if match:
+                    brands_found.append(match[0])
+                else:
+                    unmatched_orgs.append({"text": hit["word"], "score": round(hit["score"], 3)})
+            elif hit["entity_group"] == "PER":
+                people_found.append(hit["word"])
+        
+        return list(dict.fromkeys(brands_found)), claims, unmatched_orgs, list(dict.fromkeys(people_found))
 
     def check_urls(self, urls: List[str]) -> Tuple[float, List[Evidence], Dict[str, float]]:
         obf_score = 0.0
@@ -420,11 +443,20 @@ class FactChecker:
 
     def check(self, email_text: str, sender_email: Optional[str] = None) -> FactCheckResult:
         urls = extract_urls(email_text)
-        brands_found, claim_hits = self.extract_entities_and_claims(email_text)
+        brands_found, claim_hits, unmatched_orgs, people_found = self.extract_entities_and_claims(email_text)
         
         obf_score, url_evs, url_comps = self.check_urls(urls)
         brand_score, brand_evs, sender_domain = self.check_brand_impersonation(brands_found, urls, sender_email)
         claim_score, claim_evs = self.claim_risk_score(claim_hits)
+        
+        ner_evs = []
+        for org in unmatched_orgs:
+            ner_evs.append(Evidence("unverified_entity", {"organization": org["text"], "confidence": org["score"]}))
+        for person in people_found:
+            ner_evs.append(Evidence("named_individual_referenced", {"person": person}))
+
+        unverified_entity_score = min(1.0, len(unmatched_orgs) / 3.0)  # mirrors the saturation pattern already used in claim_risk_score at checker.py:409
+
         
         def _sev_label(x: float) -> str:
             if x >= 0.8: return "critical"
@@ -435,12 +467,15 @@ class FactChecker:
         components = {"brand_mismatch": brand_score,
                         "tld_risk": url_comps["tld_risk"],
                         "url_obfuscation": url_comps["url_obfuscation"],
-                        "claim_risk": claim_score}
+                        "claim_risk": claim_score,
+                        "unverified_entity": unverified_entity_score}
         
         fact_risk = (0.35*components["brand_mismatch"] +
                         0.25*components["tld_risk"] +
                         0.20*components["url_obfuscation"] +
-                        0.20*components["claim_risk"])
+                        0.20*components["claim_risk"] +
+                        0.15*components["unverified_entity"])
+        
         
         msgs = []
         if brand_score > 0:
@@ -451,10 +486,22 @@ class FactChecker:
             msgs.append("This email contains obfuscated URLs that may be used to mislead users.")
         if claim_score > 0:
             msgs.append(f"This email contains potentially suspicious phrases (claim risk: {_sev_label(claim_score)}).")
+        if components["unverified_entity"] > 0:
+            orgs_str = ", ".join([org["text"] for org in unmatched_orgs])
+            msgs.append(f"This email references unverified organizations ({orgs_str}) or named individuals ({', '.join(people_found)}).")
+        evidence = url_evs + brand_evs + claim_evs + ner_evs
 
-        evidence = url_evs + brand_evs + claim_evs
-
-        return FactCheckResult(fact_risk = min(1.0, fact_risk),
+        role_words_hit = bool(claim_hits.get("people"))
+        if role_words_hit and people_found:
+            ner_evs.append(Evidence("impersonation_pattern", {
+                "roles_mentioned": claim_hits["people"],
+                "people_mentioned": people_found,
+            }))
+            impersonation_boost = 0.25
+        else:
+            impersonation_boost = 0.0
+        
+        return FactCheckResult(fact_risk = min(1.0, fact_risk + impersonation_boost),
                                 components = components,
                                 evidence = evidence,
                                 message = msgs)
